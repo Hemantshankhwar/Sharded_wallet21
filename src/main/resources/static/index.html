@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sharded Wallet</title>
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --ink:#1c2333; --muted:#64708a; --line:#dde3f0; --accent:#3b5bdb; --ok:#2b8a3e; --err:#c92a2a; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:18px 24px; background:var(--ink); color:#fff; }
+  header h1 { margin:0; font-size:20px; }
+  header p { margin:4px 0 0; color:#aab4cf; font-size:13px; }
+  main { max-width:1100px; margin:24px auto; padding:0 16px; display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  section h2 { margin:0 0 12px; font-size:16px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
+  input { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button.alt { background:#eef1fb; color:var(--accent); }
+  button:hover { filter:brightness(.95); }
+  #logSection { grid-column:1/-1; }
+  #log { margin:0; max-height:320px; overflow:auto; background:#0f1424; color:#d7def2; padding:12px; border-radius:8px; font:12.5px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-all; }
+  .ok { color:#69db7c; } .err { color:#ff8787; } .req { color:#8fa3ff; }
+  small { color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sharded Wallet</h1>
+  <p>Minimal console for the REST API. Responses appear in the log below.</p>
+</header>
+
+<main>
+  <section>
+    <h2>1. Create user</h2>
+    <form id="formCreateUser">
+      <label for="uName">Name</label>
+      <input id="uName" required autocomplete="off">
+      <label for="uEmail">Email</label>
+      <input id="uEmail" type="email" required autocomplete="off">
+      <div class="row"><button>Create user</button></div>
+    </form>
+  </section>
+
+  <section>
+    <h2>Find user</h2>
+    <form id="formFindUser">
+      <label for="fId">By ID</label>
+      <input id="fId" inputmode="numeric" pattern="\d+" placeholder="user id">
+      <div class="row"><button>Get by ID</button></div>
+    </form>
+    <form id="formFindName">
+      <label for="fName">By exact name</label>
+      <input id="fName" placeholder="name">
+      <div class="row"><button class="alt">Search by name</button></div>
+    </form>
+  </section>
+
+  <section>
+    <h2>2. Create wallet</h2>
+    <form id="formCreateWallet">
+      <label for="wUser">User ID</label>
+      <input id="wUser" required inputmode="numeric" pattern="\d+">
+      <div class="row"><button>Create wallet</button></div>
+    </form>
+  </section>
+
+  <section>
+    <h2>3. Wallet operations</h2>
+    <label for="opWallet">Wallet ID</label>
+    <input id="opWallet" inputmode="numeric" pattern="\d+">
+    <label for="opAmount">Amount</label>
+    <input id="opAmount" type="number" min="0.01" step="0.01" value="100">
+    <div class="row">
+      <button id="btnGet" class="alt" type="button">Get wallet</button>
+      <button id="btnBalance" class="alt" type="button">Balance</button>
+      <button id="btnCredit" type="button">Credit</button>
+      <button id="btnDebit" type="button">Debit</button>
+    </div>
+    <small>Credit/debit send a fresh Idempotency-Key per click.</small>
+  </section>
+
+  <section>
+    <h2>4. Transfer</h2>
+    <form id="formTransfer">
+      <label for="tFrom">From wallet ID</label>
+      <input id="tFrom" required inputmode="numeric" pattern="\d+">
+      <label for="tTo">To wallet ID</label>
+      <input id="tTo" required inputmode="numeric" pattern="\d+">
+      <label for="tAmount">Amount</label>
+      <input id="tAmount" type="number" min="0.01" step="0.01" required value="10">
+      <label for="tDesc">Description</label>
+      <input id="tDesc" value="transfer">
+      <div class="row"><button>Transfer</button></div>
+    </form>
+    <small>A 201 means the saga ran; check balances to confirm the result.</small>
+  </section>
+
+  <section id="logSection">
+    <h2>Log <button id="btnClear" class="alt" type="button" style="float:right;padding:3px 10px">Clear</button></h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const logEl = $('log');
+
+  // IDs are 64-bit snowflakes and exceed Number.MAX_SAFE_INTEGER, so keep them as raw text.
+  const isId = (v) => /^\d{1,19}$/.test(v);
+  const quoteBigInts = (text) => text.replace(/(:\s*)(\d{16,})(?=\s*[,}\]])/g, '$1"$2"');
+
+  function log(kind, text) {
+    const line = document.createElement('div');
+    line.className = kind;
+    line.textContent = text;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  async function call(method, path, { body, idempotent } = {}) {
+    const headers = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    if (idempotent) headers['Idempotency-Key'] = crypto.randomUUID();
+
+    log('req', `> ${method} ${path}${idempotent ? `  [Idempotency-Key: ${headers['Idempotency-Key']}]` : ''}${body !== undefined ? `\n  ${body}` : ''}`);
+    try {
+      const res = await fetch(path, { method, headers, body });
+      const text = await res.text();
+      let shown = text;
+      let parsed = null;
+      try {
+        parsed = JSON.parse(quoteBigInts(text));
+        shown = JSON.stringify(parsed, null, 2);
+      } catch { /* non-JSON body, show as is */ }
+      const replay = res.headers.get('Idempotent-Replayed') ? '  (replayed)' : '';
+      log(res.ok ? 'ok' : 'err', `< ${res.status}${replay}\n${shown || '(empty)'}`);
+      return res.ok ? parsed : null;
+    } catch (e) {
+      log('err', `< network error: ${e.message}`);
+      return null;
+    }
+  }
+
+  function idOrWarn(value, label) {
+    const v = value.trim();
+    if (!isId(v)) { log('err', `${label} must be a numeric ID`); return null; }
+    return v;
+  }
+
+  $('formCreateUser').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const user = await call('POST', '/users', {
+      body: JSON.stringify({ name: $('uName').value.trim(), email: $('uEmail').value.trim() }),
+    });
+    if (user && user.id) { $('wUser').value = user.id; $('fId').value = user.id; }
+  });
+
+  $('formFindUser').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const id = idOrWarn($('fId').value, 'User ID');
+    if (id) call('GET', `/users/${id}`);
+  });
+
+  $('formFindName').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = $('fName').value.trim();
+    if (name) call('GET', `/users/name?name=${encodeURIComponent(name)}`);
+  });
+
+  $('formCreateWallet').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const userId = idOrWarn($('wUser').value, 'User ID');
+    if (!userId) return;
+    const wallet = await call('POST', '/wallets', { body: `{"userId":${userId}}` });
+    if (wallet && wallet.id) {
+      $('opWallet').value = wallet.id;
+      if (!$('tFrom').value) $('tFrom').value = wallet.id;
+      else if (!$('tTo').value) $('tTo').value = wallet.id;
+    }
+  });
+
+  const walletId = () => idOrWarn($('opWallet').value, 'Wallet ID');
+  const amount = () => {
+    const n = Number($('opAmount').value);
+    if (!(n > 0)) { log('err', 'Amount must be greater than 0'); return null; }
+    return n;
+  };
+
+  $('btnGet').onclick = () => { const id = walletId(); if (id) call('GET', `/wallets/${id}`); };
+  $('btnBalance').onclick = () => { const id = walletId(); if (id) call('GET', `/wallets/${id}/balance`); };
+  for (const [btn, op] of [['btnCredit', 'credit'], ['btnDebit', 'debit']]) {
+    $(btn).onclick = () => {
+      const id = walletId(), amt = amount();
+      if (id && amt) call('POST', `/wallets/${id}/${op}`, { body: `{"amount":${amt}}`, idempotent: true });
+    };
+  }
+
+  $('formTransfer').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const from = idOrWarn($('tFrom').value, 'From wallet ID');
+    const to = idOrWarn($('tTo').value, 'To wallet ID');
+    if (!from || !to) return;
+    const body = `{"fromWalletId":${from},"toWalletId":${to},"amount":${Number($('tAmount').value)},"description":${JSON.stringify($('tDesc').value)}}`;
+    call('POST', '/transactions', { body, idempotent: true });
+  });
+
+  $('btnClear').onclick = () => { logEl.textContent = ''; };
+</script>
+</body>
+</html>

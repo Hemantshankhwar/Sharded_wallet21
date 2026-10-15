@@ -6,42 +6,43 @@ A wallet service built with Spring Boot 3 (Java 21). Data is horizontally sharde
 
 ```mermaid
 flowchart TB
-    Client([Client])
+    Client(["Client"])
 
     subgraph App["Spring Boot application :8080"]
-        direction TB
         subgraph Web["Controllers"]
-            UC[UserController<br/>/users]
-            WC[WalletController<br/>/wallets]
-            TC[TransactionController<br/>/transactions]
-            GEH[GlobalExceptionHandler]
+            UC["UserController<br/>/users"]
+            WC["WalletController<br/>/wallets"]
+            TC["TransactionController<br/>/transactions"]
+            GEH["GlobalExceptionHandler"]
         end
 
-        IDEM[IdempotencyService]
+        IDEM["IdempotencyService"]
 
         subgraph Svc["Services"]
-            US[UserService]
-            WS[WalletService]
-            TS[TransactionService]
-            TSS[TransferSagaService]
+            US["UserService"]
+            WS["WalletService"]
+            TS["TransactionService"]
+            TSS["TransferSagaService"]
         end
 
         subgraph Saga["Saga engine"]
-            ORCH[SagaOrchestrator]
-            S1[DebitSourceWalletStep]
-            S2[CreditDestinationWalletStep]
-            S3[UpdateTransactionStatus]
+            ORCH["SagaOrchestrator"]
+            S1["DebitSourceWalletStep"]
+            S2["CreditDestinationWalletStep"]
+            S3["UpdateTransactionStatus"]
         end
 
-        REPO[Spring Data JPA repositories]
-        SS[ShardingSphere JDBC<br/>shard = id % 2 + 1]
+        REPO["Spring Data JPA repositories"]
+        SS["ShardingSphere JDBC<br/>shard = id mod 2 + 1"]
     end
 
-    Redis[(Redis<br/>idempotency keys)]
-    DB1[(MySQL<br/>shardedwallet1)]
-    DB2[(MySQL<br/>shardedwallet2)]
+    Redis[("Redis<br/>idempotency keys")]
+    DB1[("MySQL<br/>shardedwallet1")]
+    DB2[("MySQL<br/>shardedwallet2")]
 
-    Client --> UC & WC & TC
+    Client --> UC
+    Client --> WC
+    Client --> TC
     WC --> IDEM
     TC --> IDEM
     IDEM <--> Redis
@@ -51,8 +52,12 @@ flowchart TB
     TSS --> TS
     TSS --> ORCH
     ORCH --> S1 --> S2 --> S3
-    S1 & S2 --> WS
-    US & WS & TS & ORCH --> REPO
+    S1 --> WS
+    S2 --> WS
+    US --> REPO
+    WS --> REPO
+    TS --> REPO
+    ORCH --> REPO
     REPO --> SS
     SS --> DB1
     SS --> DB2
@@ -144,7 +149,7 @@ Start MySQL (create `shardedwallet1` and `shardedwallet2`) and Redis, set `DB_PA
 ./gradlew bootRun
 ```
 
-`spring.jpa.hibernate.ddl-auto=create` drops and recreates tables on every start. Change it to `update` if you want to keep data across restarts.
+`spring.jpa.hibernate.ddl-auto=update` creates missing tables and keeps existing data. With Docker, data lives in the `mysql-data` volume and survives restarts; `docker compose down -v` deletes it.
 
 ## API reference
 
