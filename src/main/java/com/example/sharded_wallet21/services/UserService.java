@@ -29,9 +29,18 @@ public class UserService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found with id " + id));
     }
 
+    public User getUserByEmail(String email) {
+        return userRepository.findByEmail(email == null ? "" : email.trim().toLowerCase())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No user with that email"));
+    }
+
     public List<User> getUsersByName(String name) {
         log.info("Fetching users with name {}", name);
         return userRepository.findByName(name);
+    }
+
+    public List<User> getAllUsers() {
+        return userRepository.findAll();
     }
 
 }

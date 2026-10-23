@@ -21,7 +21,7 @@ public class TransactionService {
     private final TransactionRepository transactionRepository;
 
     @Transactional
-    public Transaction createTransaction(Long fromWalletId, Long toWalletId, BigDecimal amount, String description) {
+    public Transaction createTransaction(Long fromWalletId, Long toWalletId, BigDecimal amount, String description, Long initiatedByUserId) {
         log.info("Creating transaction from wallet {} to wallet {} with amount {} and description {}", fromWalletId, toWalletId, amount, description);
 
         Transaction transaction = Transaction.builder()
@@ -29,6 +29,7 @@ public class TransactionService {
                 .toWalletId(toWalletId)
                 .amount(amount)
                 .description(description)
+                .initiatedByUserId(initiatedByUserId)
                 .build();
         Transaction savedTransaction = transactionRepository.save(transaction);
         log.info("Transaction created with id {}", savedTransaction.getId());
@@ -44,6 +45,10 @@ public class TransactionService {
 
     public Transaction getTransactionById(Long id) {
         return transactionRepository.findById(id).orElseThrow(() -> new RuntimeException("Transaction not found"));
+    }
+
+    public List<Transaction> getAllTransactions() {
+        return transactionRepository.findAll();
     }
 
     public List<Transaction> getTransactionByWalletId(Long walletId) {

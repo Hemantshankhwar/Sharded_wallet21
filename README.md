@@ -6,10 +6,16 @@ A wallet service built with Spring Boot 3 (Java 21). Data is horizontally sharde
 
 ```mermaid
 flowchart TB
-    Client(["Client"])
+    Client(["Browser or API client<br/>(static index.html)"])
 
     subgraph App["Spring Boot application :8080"]
+        subgraph Sec["Security layer"]
+            FC["JWT filter chain<br/>HS256 bearer, 401 / 403 JSON"]
+            AZ["Authz bean<br/>@PreAuthorize rules"]
+        end
+
         subgraph Web["Controllers"]
+            AC["AuthController<br/>/auth, /admin/users"]
             UC["UserController<br/>/users"]
             WC["WalletController<br/>/wallets"]
             TC["TransactionController<br/>/transactions"]
@@ -19,6 +25,7 @@ flowchart TB
         IDEM["IdempotencyService"]
 
         subgraph Svc["Services"]
+            AUTH["AuthService<br/>BCrypt + JWT"]
             US["UserService"]
             WS["WalletService"]
             TS["TransactionService"]
@@ -40,9 +47,14 @@ flowchart TB
     DB1[("MySQL<br/>shardedwallet1")]
     DB2[("MySQL<br/>shardedwallet2")]
 
-    Client --> UC
-    Client --> WC
-    Client --> TC
+    Client --> FC
+    FC --> AC
+    FC --> UC
+    FC --> WC
+    FC --> TC
+    AZ -.-> Web
+    AC --> AUTH
+    AUTH --> REPO
     WC --> IDEM
     TC --> IDEM
     IDEM <--> Redis
@@ -119,7 +131,7 @@ Prerequisites: Docker with Compose.
 cp .env.example .env
 cp src/main/resources/application.example.properties src/main/resources/application.properties
 cp src/main/resources/sharding.example.yml src/main/resources/sharding.yml
-# edit .env and set DB_PASSWORD
+# edit .env: set DB_PASSWORD, JWT_SECRET (32+ chars), ADMIN_EMAIL, ADMIN_PASSWORD
 
 docker compose up --build -d
 ```
@@ -138,6 +150,9 @@ Stop with `docker compose down`; add `-v` to also delete the database and Redis 
 | `DB_PORT` | `3306` | MySQL port |
 | `DB_USERNAME` | `root` | MySQL user |
 | `DB_PASSWORD` | none (required by Compose) | MySQL password |
+| `JWT_SECRET` | none (required) | HS256 signing key, at least 32 bytes (`openssl rand -base64 48`) |
+| `JWT_TTL_MINUTES` | `60` | Token lifetime |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | none (required by Compose) | Admin account created on first start if no admin exists |
 | `SPRING_DATA_REDIS_HOST` | `localhost` | Redis host |
 | `SPRING_DATA_REDIS_PORT` | `6379` | Redis port |
 
@@ -151,44 +166,77 @@ Start MySQL (create `shardedwallet1` and `shardedwallet2`) and Redis, set `DB_PA
 
 `spring.jpa.hibernate.ddl-auto=update` creates missing tables and keeps existing data. With Docker, data lives in the `mysql-data` volume and survives restarts; `docker compose down -v` deletes it.
 
+## Authentication and roles
+
+Every endpoint except `/`, `/auth/login` and `/auth/register` requires `Authorization: Bearer <token>`. Tokens are stateless HS256 JWTs (claims: `sub` = user ID, `role`, `name`) issued by `/auth/login` or `/auth/register`. There is no refresh or revocation; tokens expire after `JWT_TTL_MINUTES`. Passwords are stored as BCrypt hashes and never returned.
+
+| Role | Can do |
+|---|---|
+| `ADMIN` | Everything: list all users, wallets and transactions, create users (any role), credit/debit any wallet, transfer from any wallet |
+| `USER` | See and create own wallets, view own wallet history, look up a recipient by email, transfer only from own wallets |
+
+The first admin is created from `ADMIN_EMAIL`/`ADMIN_PASSWORD` at startup when no admin exists. Anyone may sign up through `/auth/register`, which always creates a `USER`.
+
+| Status | Meaning |
+|---|---|
+| `401` | Missing, invalid or expired token, or bad login credentials |
+| `403` | Authenticated but not allowed (for example reading another user's wallet) |
+
+Emails are normalized to lower case and are unique; a duplicate returns `409`. Because users are sharded, uniqueness is enforced in the application with a Redis lock, not a database index. Idempotency keys are scoped per authenticated user.
+
+Seed demo data as the admin with `ADMIN_EMAIL=... ADMIN_PASSWORD=... scripts/seed.sh`.
+
 ## API reference
 
-Base URL: `http://localhost:8080`. All bodies are JSON. IDs are 64-bit snowflake values; send them as numbers.
+Base URL: `http://localhost:3001` (Compose default, set `APP_PORT`). All bodies are JSON. IDs are 64-bit snowflake values; send them as numbers.
 
-Errors from `GlobalExceptionHandler` have the shape `{ "error": "<message>" }`:
-`NoSuchElementException` returns `404`, `IllegalArgumentException` returns `400`.
+Errors have the shape `{ "error": "<message>" }`: `NoSuchElementException` returns `404`, `IllegalArgumentException` returns `400`.
+
+### Auth
+
+#### `POST /auth/login`
+
+Request: `{ "email": "alice@example.com", "password": "..." }`
+
+Response `200`: `{ "token": "<jwt>", "userId": 1316905060340334592, "name": "Alice", "role": "USER" }`. Returns `401` for bad credentials.
+
+#### `POST /auth/register`
+
+Request: `{ "name": "Alice", "email": "alice@example.com", "password": "min 8 chars" }`
+
+Response `201`: same shape as login. Returns `400` for invalid input and `409` if the email exists.
+
+#### `POST /admin/users` (ADMIN)
+
+Request: `{ "name": "...", "email": "...", "password": "...", "role": "USER" }` where `role` is `USER` or `ADMIN`. Response `201` with the user.
 
 ### Users
 
-#### `POST /users`
+#### `GET /users` (ADMIN)
 
-Create a user.
+List all users. Returns `200` with an array.
 
-Request:
+#### `GET /users/me`
 
-```json
-{ "name": "Alice", "email": "alice@example.com" }
-```
+The caller's own user.
 
-Response `201 Created`:
+#### `GET /users/lookup?email={email}`
 
-```json
-{ "id": 1316905060340334592, "name": "Alice", "email": "alice@example.com" }
-```
+Find a transfer recipient. Returns `{ "userId": ..., "name": "...", "walletIds": [...] }` (no balances), or `404`.
 
-#### `GET /users/{id}`
+#### `GET /users/{id}` (self or ADMIN)
 
-Get a user by ID. Returns `200` with the user, or `404` if it does not exist.
+Get a user by ID. Returns `404` if it does not exist.
 
-#### `GET /users/name?name={name}`
+#### `GET /users/name?name={name}` (ADMIN)
 
-List users with the exact given name. Returns `200` with an array, empty if none match.
+List users with the exact given name.
 
 ### Wallets
 
 #### `POST /wallets`
 
-Create an active wallet with a zero balance for a user.
+Create an active wallet with a zero balance. A `USER` always creates for themselves (`userId` may be omitted); an `ADMIN` may pass any `userId`. Other `userId` values return `403`.
 
 Request:
 
@@ -204,15 +252,23 @@ Response `201 Created`:
 
 Returns `500` if creation fails.
 
-#### `GET /wallets/{id}`
+#### `GET /wallets/mine`
+
+The caller's wallets.
+
+#### `GET /wallets` (ADMIN)
+
+List all wallets. Add `?userId={id}` to list only the wallets of one user. Returns `200` with an array.
+
+#### `GET /wallets/{id}` (owner or ADMIN)
 
 Get a wallet. Returns `200` with the wallet, or `404` with `{"error":"Wallet not found"}`.
 
-#### `GET /wallets/{id}/balance`
+#### `GET /wallets/{id}/balance` (owner or ADMIN)
 
 Get the balance. Returns `200` with a bare number, for example `380.00`.
 
-#### `POST /wallets/{id}/credit`
+#### `POST /wallets/{id}/credit` (ADMIN)
 
 Add funds. Requires the `Idempotency-Key` header.
 
@@ -224,7 +280,7 @@ Request:
 
 Response `200 OK`: the updated wallet.
 
-#### `POST /wallets/{id}/debit`
+#### `POST /wallets/{id}/debit` (ADMIN)
 
 Remove funds. Requires the `Idempotency-Key` header.
 
@@ -238,9 +294,13 @@ Response `200 OK`: the updated wallet. Returns `400` with `{"error":"Insufficien
 
 ### Transactions
 
-#### `POST /transactions`
+#### `GET /transactions?walletId={id}` (owner or ADMIN)
 
-Transfer money between two wallets using the saga. Requires the `Idempotency-Key` header.
+List transactions where the wallet is the sender or the receiver. Without `walletId` it lists every transaction and is ADMIN only.
+
+#### `POST /transactions` (source wallet owner or ADMIN)
+
+Transfer money between two wallets using the saga. Requires the `Idempotency-Key` header. Returns `400` if the amount is not positive or both wallets are the same, and `403` if the caller does not own `fromWalletId`.
 
 Request:
 
@@ -272,17 +332,15 @@ The transfer runs synchronously before the response returns. A `201` means the s
 ### Example session
 
 ```bash
-B=http://localhost:8080; H='Content-Type: application/json'
+B=http://localhost:3001; H='Content-Type: application/json'
 
-curl -X POST $B/users   -H "$H" -d '{"name":"Alice","email":"alice@example.com"}'
-curl -X POST $B/users   -H "$H" -d '{"name":"Bob","email":"bob@example.com"}'
-curl -X POST $B/wallets -H "$H" -d '{"userId":<ALICE_ID>}'
-curl -X POST $B/wallets -H "$H" -d '{"userId":<BOB_ID>}'
+TOKEN=$(curl -s -X POST $B/auth/login -H "$H" -d '{"email":"<ADMIN_EMAIL>","password":"<ADMIN_PASSWORD>"}' | jq -r .token)
+A="Authorization: Bearer $TOKEN"
 
-curl -X POST $B/wallets/<ALICE_WALLET>/credit -H "$H" -H 'Idempotency-Key: k1' -d '{"amount":500}'
-curl -X POST $B/transactions -H "$H" -H 'Idempotency-Key: t1' \
-  -d '{"fromWalletId":<ALICE_WALLET>,"toWalletId":<BOB_WALLET>,"amount":120,"description":"test"}'
-curl $B/wallets/<ALICE_WALLET>/balance
+curl -X POST $B/admin/users -H "$H" -H "$A" -d '{"name":"Alice","email":"alice@example.com","password":"Secret123","role":"USER"}'
+curl -X POST $B/wallets -H "$H" -H "$A" -d '{"userId":<ALICE_ID>}'
+curl -X POST $B/wallets/<ALICE_WALLET>/credit -H "$H" -H "$A" -H 'Idempotency-Key: k1' -d '{"amount":500}'
+curl $B/wallets/<ALICE_WALLET>/balance -H "$A"
 ```
 
 ## Project layout

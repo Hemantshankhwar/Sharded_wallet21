@@ -5,102 +5,170 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sharded Wallet</title>
 <style>
-  :root { --bg:#f4f6fb; --card:#fff; --ink:#1c2333; --muted:#64708a; --line:#dde3f0; --accent:#3b5bdb; --ok:#2b8a3e; --err:#c92a2a; }
+  :root { --bg:#f4f6fb; --card:#fff; --ink:#1c2333; --muted:#64708a; --line:#dde3f0; --accent:#3b5bdb; --soft:#eef1fb; }
   * { box-sizing: border-box; }
   body { margin:0; font:15px/1.45 system-ui,-apple-system,Segoe UI,sans-serif; background:var(--bg); color:var(--ink); }
-  header { padding:18px 24px; background:var(--ink); color:#fff; }
+  header { padding:16px 24px; background:var(--ink); color:#fff; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
   header h1 { margin:0; font-size:20px; }
-  header p { margin:4px 0 0; color:#aab4cf; font-size:13px; }
-  main { max-width:1100px; margin:24px auto; padding:0 16px; display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
-  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
-  section h2 { margin:0 0 12px; font-size:16px; }
+  header p { margin:2px 0 0; color:#aab4cf; font-size:13px; }
+  main { max-width:1200px; margin:20px auto; padding:0 16px; display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
+  section.wide { grid-column:1/-1; }
+  h2 { margin:0 0 12px; font-size:16px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
   label { display:block; font-size:12px; color:var(--muted); margin:8px 0 3px; }
-  input { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
-  input:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  input, select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; background:#fff; }
+  input:focus, select:focus { outline:2px solid var(--accent); outline-offset:-1px; }
   .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
   button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
-  button.alt { background:#eef1fb; color:var(--accent); }
-  button:hover { filter:brightness(.95); }
-  #logSection { grid-column:1/-1; }
-  #log { margin:0; max-height:320px; overflow:auto; background:#0f1424; color:#d7def2; padding:12px; border-radius:8px; font:12.5px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-all; }
-  .ok { color:#69db7c; } .err { color:#ff8787; } .req { color:#8fa3ff; }
+  button.alt { background:var(--soft); color:var(--accent); }
+  button.sm { padding:3px 10px; font-size:13px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button:hover:not(:disabled) { filter:brightness(.95); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { text-align:left; color:var(--muted); font-weight:500; font-size:12px; padding:6px 8px; border-bottom:1px solid var(--line); }
+  td { padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  tr.sel td { background:var(--soft); }
+  tr.clickable { cursor:pointer; }
+  tr.clickable:hover td { background:#f6f8fd; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .mono { font:12px ui-monospace,Menlo,monospace; color:var(--muted); }
+  .empty { color:var(--muted); padding:10px 2px; }
+  .badge { font-size:11px; padding:1px 7px; border-radius:10px; background:var(--soft); color:var(--accent); }
+  .badge.SUCCESS { background:#d3f9d8; color:#2b8a3e; }
+  .badge.FAILED, .badge.CANCELLED { background:#ffe3e3; color:#c92a2a; }
+  .scroll { overflow-x:auto; }
   small { color:var(--muted); }
+  #log { margin:0; max-height:300px; overflow:auto; background:#0f1424; color:#d7def2; padding:12px; border-radius:8px; font:12.5px/1.5 ui-monospace,Menlo,monospace; white-space:pre-wrap; word-break:break-all; }
+  .ok { color:#69db7c; } .err { color:#ff8787; } .req { color:#8fa3ff; }
+  .hidden { display:none !important; }
+  #authView { max-width:380px; margin:40px auto; padding:0 16px; }
+  .tabs { display:flex; gap:8px; margin-bottom:8px; }
+  .msg { margin-top:10px; color:#c92a2a; font-size:13px; min-height:1em; }
+  #who { color:#aab4cf; font-size:13px; margin-right:10px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Sharded Wallet</h1>
-  <p>Minimal console for the REST API. Responses appear in the log below.</p>
+  <div>
+    <h1>Sharded Wallet</h1>
+    <p id="subtitle">Sign in to continue.</p>
+  </div>
+  <div>
+    <span id="who"></span>
+    <button id="btnRefresh" class="alt hidden" type="button">Refresh</button>
+    <button id="btnLogout" class="alt hidden" type="button">Log out</button>
+  </div>
 </header>
 
-<main>
+<div id="authView">
   <section>
-    <h2>1. Create user</h2>
+    <div class="tabs">
+      <button id="tabLogin" type="button">Log in</button>
+      <button id="tabRegister" class="alt" type="button">Sign up</button>
+    </div>
+    <form id="formAuth">
+      <div id="authNameRow" class="hidden">
+        <label for="aName">Name</label>
+        <input id="aName" autocomplete="name">
+      </div>
+      <label for="aEmail">Email</label>
+      <input id="aEmail" type="email" required autocomplete="username">
+      <label for="aPass">Password</label>
+      <input id="aPass" type="password" required minlength="8" autocomplete="current-password">
+      <div class="row"><button id="authSubmit">Log in</button></div>
+      <div id="authMsg" class="msg"></div>
+    </form>
+  </section>
+</div>
+
+<main id="userView" class="hidden">
+  <section>
+    <h2><span>My wallets</span> <button id="mNewWallet" class="alt sm" type="button">+ New wallet</button></h2>
+    <div class="scroll"><table id="mWallets"></table></div>
+  </section>
+
+  <section>
+    <h2>Send money</h2>
+    <form id="mTransfer">
+      <label for="mFrom">From my wallet</label>
+      <select id="mFrom" required></select>
+      <label for="mEmail">Recipient email</label>
+      <div class="row" style="margin-top:0">
+        <input id="mEmail" type="email" placeholder="friend@example.com" style="flex:1" required>
+        <button id="mLookup" class="alt" type="button">Find</button>
+      </div>
+      <label for="mTo">Recipient wallet</label>
+      <select id="mTo" required></select>
+      <small id="mRecipient"></small>
+      <label for="mAmount">Amount</label>
+      <input id="mAmount" type="number" min="0.01" step="0.01" required value="10">
+      <label for="mDesc">Description</label>
+      <input id="mDesc" value="transfer">
+      <div class="row"><button id="mSend">Send</button></div>
+    </form>
+  </section>
+
+  <section class="wide">
+    <h2><span id="mHistTitle">History</span></h2>
+    <div class="scroll"><table id="mHist"></table></div>
+  </section>
+</main>
+
+<main id="adminView" class="hidden">
+  <section>
+    <h2>Users</h2>
+    <div class="scroll"><table id="usersTable"></table></div>
     <form id="formCreateUser">
-      <label for="uName">Name</label>
-      <input id="uName" required autocomplete="off">
-      <label for="uEmail">Email</label>
-      <input id="uEmail" type="email" required autocomplete="off">
-      <div class="row"><button>Create user</button></div>
+      <label for="uName">New user</label>
+      <input id="uName" placeholder="Name" required autocomplete="off">
+      <input id="uEmail" type="email" placeholder="Email" required autocomplete="off" style="margin-top:6px">
+      <input id="uPass" type="password" placeholder="Password (min 8)" required minlength="8" autocomplete="new-password" style="margin-top:6px">
+      <select id="uRole" style="margin-top:6px"><option>USER</option><option>ADMIN</option></select>
+      <div class="row"><button>Add user</button></div>
     </form>
   </section>
 
   <section>
-    <h2>Find user</h2>
-    <form id="formFindUser">
-      <label for="fId">By ID</label>
-      <input id="fId" inputmode="numeric" pattern="\d+" placeholder="user id">
-      <div class="row"><button>Get by ID</button></div>
-    </form>
-    <form id="formFindName">
-      <label for="fName">By exact name</label>
-      <input id="fName" placeholder="name">
-      <div class="row"><button class="alt">Search by name</button></div>
-    </form>
+    <h2><span id="walletsTitle">Wallets</span> <button id="btnNewWallet" class="alt sm" type="button">+ New wallet</button></h2>
+    <div class="scroll"><table id="walletsTable"></table></div>
+    <small>Select a user on the left to see their wallets.</small>
   </section>
 
   <section>
-    <h2>2. Create wallet</h2>
-    <form id="formCreateWallet">
-      <label for="wUser">User ID</label>
-      <input id="wUser" required inputmode="numeric" pattern="\d+">
-      <div class="row"><button>Create wallet</button></div>
-    </form>
-  </section>
-
-  <section>
-    <h2>3. Wallet operations</h2>
-    <label for="opWallet">Wallet ID</label>
-    <input id="opWallet" inputmode="numeric" pattern="\d+">
+    <h2>Wallet operations</h2>
+    <label for="opWallet">Wallet</label>
+    <select id="opWallet"></select>
     <label for="opAmount">Amount</label>
     <input id="opAmount" type="number" min="0.01" step="0.01" value="100">
     <div class="row">
-      <button id="btnGet" class="alt" type="button">Get wallet</button>
-      <button id="btnBalance" class="alt" type="button">Balance</button>
       <button id="btnCredit" type="button">Credit</button>
       <button id="btnDebit" type="button">Debit</button>
     </div>
-    <small>Credit/debit send a fresh Idempotency-Key per click.</small>
+    <small>Each click sends a fresh Idempotency-Key.</small>
   </section>
 
   <section>
-    <h2>4. Transfer</h2>
+    <h2>Transfer</h2>
     <form id="formTransfer">
-      <label for="tFrom">From wallet ID</label>
-      <input id="tFrom" required inputmode="numeric" pattern="\d+">
-      <label for="tTo">To wallet ID</label>
-      <input id="tTo" required inputmode="numeric" pattern="\d+">
+      <label for="tFrom">From</label>
+      <select id="tFrom" required></select>
+      <label for="tTo">To</label>
+      <select id="tTo" required></select>
       <label for="tAmount">Amount</label>
       <input id="tAmount" type="number" min="0.01" step="0.01" required value="10">
       <label for="tDesc">Description</label>
       <input id="tDesc" value="transfer">
-      <div class="row"><button>Transfer</button></div>
+      <div class="row"><button>Send</button></div>
     </form>
-    <small>A 201 means the saga ran; check balances to confirm the result.</small>
   </section>
 
-  <section id="logSection">
-    <h2>Log <button id="btnClear" class="alt" type="button" style="float:right;padding:3px 10px">Clear</button></h2>
+  <section class="wide">
+    <h2><span id="histTitle">Transaction history</span></h2>
+    <div class="scroll"><table id="histTable"></table></div>
+  </section>
+
+  <section class="wide" id="logSection">
+    <h2>Log <button id="btnClear" class="alt sm" type="button">Clear</button></h2>
     <pre id="log"></pre>
   </section>
 </main>
@@ -109,35 +177,57 @@
   const $ = (id) => document.getElementById(id);
   const logEl = $('log');
 
-  // IDs are 64-bit snowflakes and exceed Number.MAX_SAFE_INTEGER, so keep them as raw text.
-  const isId = (v) => /^\d{1,19}$/.test(v);
-  const quoteBigInts = (text) => text.replace(/(:\s*)(\d{16,})(?=\s*[,}\]])/g, '$1"$2"');
+  // IDs are 64-bit snowflakes beyond Number.MAX_SAFE_INTEGER, so keep them as strings end to end.
+  // Snowflake IDs exceed 2^53, so quote them (object values and array items) before JSON.parse.
+  const quoteBigInts = (text) => text.replace(/([:\[,]\s*)(\d{16,})(?=\s*[,}\]])/g, '$1"$2"');
+
+  const state = { users: [], wallets: [], selectedUser: null };
+  const session = {
+    get token() { return sessionStorage.getItem('token'); },
+    get info() { return JSON.parse(sessionStorage.getItem('info') || 'null'); },
+    set(auth) { sessionStorage.setItem('token', auth.token); sessionStorage.setItem('info', JSON.stringify(auth)); },
+    clear() { sessionStorage.clear(); },
+  };
+
+  const money = (n) => Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const shortId = (id) => '…' + String(id).slice(-6);
+  const userById = (id) => state.users.find((u) => u.id === String(id));
+  const ownerName = (w) => (userById(w.userId) || { name: 'Unknown' }).name;
+  const walletLabel = (w) => `${ownerName(w)} · ${shortId(w.id)} · ${money(w.balance)}`;
+
+  function h(tag, props = {}, ...children) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') el.className = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v);
+    }
+    for (const c of children.flat()) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+    return el;
+  }
 
   function log(kind, text) {
-    const line = document.createElement('div');
-    line.className = kind;
-    line.textContent = text;
-    logEl.appendChild(line);
+    logEl.appendChild(h('div', { class: kind }, text));
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  async function call(method, path, { body, idempotent } = {}) {
+  async function call(method, path, { body, idempotent, quiet } = {}) {
     const headers = {};
+    if (session.token) headers['Authorization'] = 'Bearer ' + session.token;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (idempotent) headers['Idempotency-Key'] = crypto.randomUUID();
-
-    log('req', `> ${method} ${path}${idempotent ? `  [Idempotency-Key: ${headers['Idempotency-Key']}]` : ''}${body !== undefined ? `\n  ${body}` : ''}`);
+    if (!quiet) log('req', `> ${method} ${path}${idempotent ? `  [Idempotency-Key: ${headers['Idempotency-Key']}]` : ''}${body !== undefined ? `\n  ${body}` : ''}`);
     try {
       const res = await fetch(path, { method, headers, body });
       const text = await res.text();
-      let shown = text;
       let parsed = null;
-      try {
-        parsed = JSON.parse(quoteBigInts(text));
-        shown = JSON.stringify(parsed, null, 2);
-      } catch { /* non-JSON body, show as is */ }
-      const replay = res.headers.get('Idempotent-Replayed') ? '  (replayed)' : '';
-      log(res.ok ? 'ok' : 'err', `< ${res.status}${replay}\n${shown || '(empty)'}`);
+      let shown = text;
+      try { parsed = JSON.parse(quoteBigInts(text)); shown = JSON.stringify(parsed, null, 2); } catch { /* non-JSON */ }
+      if (res.status === 401 && session.token && !path.startsWith('/auth/')) { logout('Session expired, please log in again.'); return null; }
+      if (!quiet || !res.ok) {
+        const replay = res.headers.get('Idempotent-Replayed') ? '  (replayed)' : '';
+        log(res.ok ? 'ok' : 'err', `< ${res.status}${replay}\n${shown || '(empty)'}`);
+      }
       return res.ok ? parsed : null;
     } catch (e) {
       log('err', `< network error: ${e.message}`);
@@ -145,70 +235,262 @@
     }
   }
 
-  function idOrWarn(value, label) {
-    const v = value.trim();
-    if (!isId(v)) { log('err', `${label} must be a numeric ID`); return null; }
-    return v;
+  function fillSelect(sel, wallets) {
+    const prev = sel.value;
+    sel.replaceChildren(...wallets.map((w) => h('option', { value: w.id }, walletLabel(w))));
+    if (wallets.some((w) => w.id === prev)) sel.value = prev;
   }
+
+  function renderUsers() {
+    const rows = state.users.map((u) => {
+      const ws = state.wallets.filter((w) => w.userId === u.id);
+      const total = ws.reduce((s, w) => s + Number(w.balance), 0);
+      return h('tr', { class: 'clickable' + (u.id === state.selectedUser ? ' sel' : ''), onclick: () => selectUser(u.id) },
+        h('td', {}, h('div', {}, u.name), h('div', { class: 'mono' }, u.email)),
+        h('td', { class: 'num' }, ws.length),
+        h('td', { class: 'num' }, money(total)));
+    });
+    $('usersTable').replaceChildren(
+      h('tr', {}, h('th', {}, 'User'), h('th', { class: 'num' }, 'Wallets'), h('th', { class: 'num' }, 'Total')),
+      ...(rows.length ? rows : [h('tr', {}, h('td', { colspan: 3, class: 'empty' }, 'No users yet'))]));
+  }
+
+  function renderWallets() {
+    const u = userById(state.selectedUser);
+    $('walletsTitle').textContent = u ? `Wallets of ${u.name}` : 'Wallets';
+    $('btnNewWallet').disabled = !u;
+    const ws = u ? state.wallets.filter((w) => w.userId === u.id) : [];
+    $('walletsTable').replaceChildren(
+      h('tr', {}, h('th', {}, 'Wallet'), h('th', { class: 'num' }, 'Balance'), h('th', {}, '')),
+      ...(ws.length ? ws.map((w) => h('tr', {},
+        h('td', { class: 'mono' }, w.id),
+        h('td', { class: 'num' }, money(w.balance)),
+        h('td', {}, h('button', { class: 'alt sm', type: 'button', onclick: () => useWallet(w.id) }, 'Use'))))
+        : [h('tr', {}, h('td', { colspan: 3, class: 'empty' }, u ? 'No wallets yet. Click "+ New wallet".' : 'No user selected'))]));
+  }
+
+  function renderSelects() {
+    fillSelect($('opWallet'), state.wallets);
+    fillSelect($('tFrom'), state.wallets);
+    fillSelect($('tTo'), state.wallets);
+  }
+
+  async function renderHistory() {
+    const id = $('opWallet').value;
+    const t = $('histTable');
+    if (!id) { t.replaceChildren(h('tr', {}, h('td', { class: 'empty' }, 'No wallet selected'))); return; }
+    const w = state.wallets.find((x) => x.id === id);
+    $('histTitle').textContent = `Transaction history · ${w ? walletLabel(w) : id}`;
+    const txs = (await call('GET', `/transactions?walletId=${id}`, { quiet: true })) || [];
+    const name = (wid) => { const x = state.wallets.find((v) => v.id === String(wid)); return x ? `${ownerName(x)} (${shortId(wid)})` : shortId(wid); };
+    txs.sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
+    t.replaceChildren(
+      h('tr', {}, h('th', {}, 'From'), h('th', {}, 'To'), h('th', { class: 'num' }, 'Amount'), h('th', {}, 'Status'), h('th', {}, 'Description')),
+      ...(txs.length ? txs.map((x) => h('tr', {},
+        h('td', {}, name(x.fromWalletId)),
+        h('td', {}, name(x.toWalletId)),
+        h('td', { class: 'num' }, money(x.amount)),
+        h('td', {}, h('span', { class: 'badge ' + x.status }, x.status)),
+        h('td', {}, x.description)))
+        : [h('tr', {}, h('td', { colspan: 5, class: 'empty' }, 'No transactions for this wallet'))]));
+  }
+
+  async function refresh() {
+    const [users, wallets] = await Promise.all([
+      call('GET', '/users', { quiet: true }), call('GET', '/wallets', { quiet: true })]);
+    state.users = (users || []).sort((a, b) => a.name.localeCompare(b.name));
+    state.wallets = wallets || [];
+    if (!userById(state.selectedUser)) state.selectedUser = state.users[0]?.id ?? null;
+    state.wallets.sort((a, b) => ownerName(a).localeCompare(ownerName(b)) || (BigInt(a.id) > BigInt(b.id) ? 1 : -1));
+    renderUsers(); renderWallets(); renderSelects();
+    await renderHistory();
+  }
+
+  function selectUser(id) {
+    state.selectedUser = id;
+    const mine = state.wallets.filter((w) => w.userId === id);
+    renderUsers(); renderWallets();
+    if (mine.length) useWallet(mine[0].id);
+  }
+
+  function useWallet(id) {
+    $('opWallet').value = id;
+    $('tFrom').value = id;
+    renderHistory();
+  }
+
+  $('opWallet').addEventListener('change', renderHistory);
 
   $('formCreateUser').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const user = await call('POST', '/users', {
-      body: JSON.stringify({ name: $('uName').value.trim(), email: $('uEmail').value.trim() }),
-    });
-    if (user && user.id) { $('wUser').value = user.id; $('fId').value = user.id; }
+    const user = await call('POST', '/admin/users', {
+      body: JSON.stringify({ name: $('uName').value.trim(), email: $('uEmail').value.trim(),
+        password: $('uPass').value, role: $('uRole').value }) });
+    if (!user) return;
+    e.target.reset();
+    state.selectedUser = user.id;
+    await refresh();
   });
 
-  $('formFindUser').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const id = idOrWarn($('fId').value, 'User ID');
-    if (id) call('GET', `/users/${id}`);
-  });
-
-  $('formFindName').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const name = $('fName').value.trim();
-    if (name) call('GET', `/users/name?name=${encodeURIComponent(name)}`);
-  });
-
-  $('formCreateWallet').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const userId = idOrWarn($('wUser').value, 'User ID');
-    if (!userId) return;
-    const wallet = await call('POST', '/wallets', { body: `{"userId":${userId}}` });
-    if (wallet && wallet.id) {
-      $('opWallet').value = wallet.id;
-      if (!$('tFrom').value) $('tFrom').value = wallet.id;
-      else if (!$('tTo').value) $('tTo').value = wallet.id;
-    }
-  });
-
-  const walletId = () => idOrWarn($('opWallet').value, 'Wallet ID');
-  const amount = () => {
-    const n = Number($('opAmount').value);
-    if (!(n > 0)) { log('err', 'Amount must be greater than 0'); return null; }
-    return n;
+  $('btnNewWallet').onclick = async () => {
+    if (!state.selectedUser) return;
+    const w = await call('POST', '/wallets', { body: `{"userId":${state.selectedUser}}` });
+    if (!w) return;
+    await refresh();
+    useWallet(w.id);
   };
 
-  $('btnGet').onclick = () => { const id = walletId(); if (id) call('GET', `/wallets/${id}`); };
-  $('btnBalance').onclick = () => { const id = walletId(); if (id) call('GET', `/wallets/${id}/balance`); };
   for (const [btn, op] of [['btnCredit', 'credit'], ['btnDebit', 'debit']]) {
-    $(btn).onclick = () => {
-      const id = walletId(), amt = amount();
-      if (id && amt) call('POST', `/wallets/${id}/${op}`, { body: `{"amount":${amt}}`, idempotent: true });
+    $(btn).onclick = async () => {
+      const id = $('opWallet').value;
+      const amt = Number($('opAmount').value);
+      if (!id) { log('err', 'Select a wallet first'); return; }
+      if (!(amt > 0)) { log('err', 'Amount must be greater than 0'); return; }
+      await call('POST', `/wallets/${id}/${op}`, { body: `{"amount":${amt}}`, idempotent: true });
+      await refresh();
     };
   }
 
-  $('formTransfer').addEventListener('submit', (e) => {
+  $('formTransfer').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const from = idOrWarn($('tFrom').value, 'From wallet ID');
-    const to = idOrWarn($('tTo').value, 'To wallet ID');
-    if (!from || !to) return;
-    const body = `{"fromWalletId":${from},"toWalletId":${to},"amount":${Number($('tAmount').value)},"description":${JSON.stringify($('tDesc').value)}}`;
-    call('POST', '/transactions', { body, idempotent: true });
+    const from = $('tFrom').value, to = $('tTo').value;
+    if (!from || !to) { log('err', 'Pick both wallets'); return; }
+    if (from === to) { log('err', 'From and To must be different wallets'); return; }
+    const body = `{"fromWalletId":${from},"toWalletId":${to},"amount":${Number($('tAmount').value)},"description":${JSON.stringify($('tDesc').value || 'transfer')}}`;
+    await call('POST', '/transactions', { body, idempotent: true });
+    await refresh();
   });
 
   $('btnClear').onclick = () => { logEl.textContent = ''; };
+
+  // ---- User (non-admin) view ----
+  const mine = { wallets: [] };
+  const myLabel = (w) => `${shortId(w.id)} · ${money(w.balance)}`;
+
+  async function refreshMine() {
+    mine.wallets = (await call('GET', '/wallets/mine', { quiet: true })) || [];
+    mine.wallets.sort((a, b) => (BigInt(a.id) > BigInt(b.id) ? 1 : -1));
+    const prev = $('mFrom').value;
+    $('mFrom').replaceChildren(...mine.wallets.map((w) => h('option', { value: w.id }, myLabel(w))));
+    if (mine.wallets.some((w) => w.id === prev)) $('mFrom').value = prev;
+    $('mWallets').replaceChildren(
+      h('tr', {}, h('th', {}, 'Wallet'), h('th', { class: 'num' }, 'Balance'), h('th', {}, '')),
+      ...(mine.wallets.length ? mine.wallets.map((w) => h('tr', {},
+        h('td', { class: 'mono' }, w.id),
+        h('td', { class: 'num' }, money(w.balance)),
+        h('td', {}, h('button', { class: 'alt sm', type: 'button', onclick: () => { $('mFrom').value = w.id; renderMyHistory(); } }, 'Use'))))
+        : [h('tr', {}, h('td', { colspan: 3, class: 'empty' }, 'No wallets yet. Click "+ New wallet".'))]));
+    await renderMyHistory();
+  }
+
+  async function renderMyHistory() {
+    const id = $('mFrom').value;
+    if (!id) { $('mHist').replaceChildren(h('tr', {}, h('td', { class: 'empty' }, 'No wallet selected'))); return; }
+    $('mHistTitle').textContent = `History · ${shortId(id)}`;
+    const txs = (await call('GET', `/transactions?walletId=${id}`, { quiet: true })) || [];
+    txs.sort((a, b) => (BigInt(b.id) > BigInt(a.id) ? 1 : -1));
+    $('mHist').replaceChildren(
+      h('tr', {}, h('th', {}, 'Direction'), h('th', {}, 'Other wallet'), h('th', { class: 'num' }, 'Amount'), h('th', {}, 'Status'), h('th', {}, 'Description')),
+      ...(txs.length ? txs.map((x) => {
+        const out = String(x.fromWalletId) === id;
+        return h('tr', {},
+          h('td', {}, out ? 'Sent' : 'Received'),
+          h('td', { class: 'mono' }, shortId(out ? x.toWalletId : x.fromWalletId)),
+          h('td', { class: 'num' }, (out ? '-' : '+') + money(x.amount)),
+          h('td', {}, h('span', { class: 'badge ' + x.status }, x.status)),
+          h('td', {}, x.description));
+      }) : [h('tr', {}, h('td', { colspan: 5, class: 'empty' }, 'No transactions for this wallet'))]));
+  }
+
+  $('mFrom').addEventListener('change', renderMyHistory);
+
+  $('mNewWallet').onclick = async () => {
+    if (await call('POST', '/wallets', { body: '{}' })) await refreshMine();
+  };
+
+  $('mLookup').onclick = async () => {
+    const email = $('mEmail').value.trim();
+    $('mTo').replaceChildren();
+    $('mRecipient').textContent = '';
+    if (!email) return;
+    const r = await call('GET', `/users/lookup?email=${encodeURIComponent(email)}`, { quiet: true });
+    if (!r) { $('mRecipient').textContent = 'No user found with that email.'; return; }
+    $('mRecipient').textContent = `Recipient: ${r.name}`;
+    $('mTo').replaceChildren(...r.walletIds.map((w) => h('option', { value: String(w) }, shortId(w))));
+    if (!r.walletIds.length) $('mRecipient').textContent += ' (has no wallets yet)';
+  };
+
+  $('mTransfer').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const from = $('mFrom').value, to = $('mTo').value;
+    if (!from) { log('err', 'Create a wallet first'); return; }
+    if (!to) { $('mRecipient').textContent = 'Click Find to choose a recipient wallet.'; return; }
+    const body = `{"fromWalletId":${from},"toWalletId":${to},"amount":${Number($('mAmount').value)},"description":${JSON.stringify($('mDesc').value || 'transfer')}}`;
+    const btn = $('mSend');
+    btn.disabled = true;
+    const res = await call('POST', '/transactions', { body, idempotent: true });
+    btn.disabled = false;
+    $('mRecipient').textContent = res ? 'Transfer submitted.' : 'Transfer failed. See log.';
+    await refreshMine();
+  });
+
+  // ---- Auth flow ----
+  let registerMode = false;
+  function setMode(reg) {
+    registerMode = reg;
+    $('authNameRow').classList.toggle('hidden', !reg);
+    $('aName').required = reg;
+    $('authSubmit').textContent = reg ? 'Create account' : 'Log in';
+    $('aPass').autocomplete = reg ? 'new-password' : 'current-password';
+    $('tabLogin').classList.toggle('alt', reg);
+    $('tabRegister').classList.toggle('alt', !reg);
+    $('authMsg').textContent = '';
+  }
+  $('tabLogin').onclick = () => setMode(false);
+  $('tabRegister').onclick = () => setMode(true);
+
+  $('formAuth').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = registerMode
+      ? { name: $('aName').value.trim(), email: $('aEmail').value.trim(), password: $('aPass').value }
+      : { email: $('aEmail').value.trim(), password: $('aPass').value };
+    const res = await fetch(registerMode ? '/auth/register' : '/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const text = await res.text();
+    let data = null;
+    try { data = JSON.parse(quoteBigInts(text)); } catch { /* ignore */ }
+    if (!res.ok || !data?.token) { $('authMsg').textContent = data?.error || 'Request failed'; return; }
+    $('aPass').value = '';
+    session.set(data);
+    start();
+  });
+
+  function logout(message) {
+    session.clear();
+    state.users = []; state.wallets = []; state.selectedUser = null; mine.wallets = [];
+    logEl.textContent = '';
+    start();
+    if (message) $('authMsg').textContent = message;
+  }
+  $('btnLogout').onclick = () => logout();
+
+  function start() {
+    const info = session.info;
+    const loggedIn = !!(info && session.token);
+    const admin = loggedIn && info.role === 'ADMIN';
+    $('authView').classList.toggle('hidden', loggedIn);
+    $('adminView').classList.toggle('hidden', !admin);
+    $('userView').classList.toggle('hidden', !loggedIn || admin);
+    $('btnLogout').classList.toggle('hidden', !loggedIn);
+    $('btnRefresh').classList.toggle('hidden', !loggedIn);
+    $('who').textContent = loggedIn ? `${info.name} (${info.role})` : '';
+    $('subtitle').textContent = !loggedIn ? 'Sign in to continue.'
+      : admin ? 'Admin console: all users, wallets and transactions.' : 'Your wallets and transfers.';
+    $('btnRefresh').onclick = admin ? refresh : refreshMine;
+    if (admin) refresh(); else if (loggedIn) refreshMine();
+  }
+
+  start();
 </script>
 </body>
 </html>

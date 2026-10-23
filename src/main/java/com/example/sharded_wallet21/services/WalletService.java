@@ -40,6 +40,10 @@ public class WalletService {
         return walletRepository.findByUserId(userId);
     }
 
+    public List<Wallet> getAllWallets() {
+        return walletRepository.findAll();
+    }
+
     @Transactional
     public void debit(Long walletId, BigDecimal amount) {
         log.info("Debiting {} from wallet {}", amount, walletId);

@@ -50,4 +50,7 @@ public class Transaction {
 
     @Column(name = "saga_instance_id")
     private Long sagaInstanceId;
+
+    @Column(name = "initiated_by_user_id")
+    private Long initiatedByUserId;
 }

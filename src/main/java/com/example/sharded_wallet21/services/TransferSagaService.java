@@ -28,11 +28,12 @@ public class TransferSagaService {
             Long fromWalletId,
             Long toWalletId,
             BigDecimal amount,
-            String description
+            String description,
+            Long initiatedByUserId
     ) {
         log.info("Initiating transfer from wallet {} to wallet {} with amount {} and description {}", fromWalletId, toWalletId, amount, description);
 
-        Transaction transaction = transactionService.createTransaction(fromWalletId, toWalletId, amount, description);
+        Transaction transaction = transactionService.createTransaction(fromWalletId, toWalletId, amount, description, initiatedByUserId);
 
         SagaContext sagaContext = SagaContext.builder()
                 .data(Map.ofEntries(
