@@ -136,7 +136,35 @@ cp src/main/resources/sharding.example.yml src/main/resources/sharding.yml
 docker compose up --build -d
 ```
 
-This starts MySQL 8.4 (with `shardedwallet1` and `shardedwallet2` created), Redis 7 and the app on `http://localhost:8080`. The app image is built in three stages: Gradle build, Spring Boot layer extraction, and a slim JRE runtime running as a non-root user.
+This starts MySQL 8.4 (with `shardedwallet1` and `shardedwallet2` created), Redis 7 and the app on `http://localhost:${APP_PORT}` (default 8080; this project's `.env` uses 3001). The app image is built in three stages: Gradle build, Spring Boot layer extraction, and a slim JRE runtime running as a non-root user.
+
+### Docker deployment
+
+Only the app port is published to the host. MySQL and Redis are reachable only on the Compose network, and the frontend is served by the app itself.
+
+```mermaid
+flowchart TB
+    User["Browser / curl"]
+
+    subgraph Host["Host machine"]
+        Port["localhost:3001 (published)"]
+
+        subgraph Docker["Docker Compose network"]
+            FE["Frontend (static page)<br/>served by app, :8080"]
+            BE["Backend (Spring Boot)<br/>app container, :8080"]
+            DB[("MySQL 8.4<br/>mysql container, :3306")]
+            RD[("Redis 7<br/>redis container, :6379")]
+        end
+    end
+
+    User -->|HTTP| Port
+    Port -->|"3001 to 8080"| FE
+    FE --> BE
+    BE -->|"mysql:3306"| DB
+    BE -->|"redis:6379"| RD
+```
+
+The app starts only after the `mysql` and `redis` health checks pass (`depends_on` with `service_healthy`). Containers reach each other by service name (`mysql`, `redis`).
 
 Stop with `docker compose down`; add `-v` to also delete the database and Redis volumes.
 
